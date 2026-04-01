@@ -98,6 +98,14 @@ def salvar_novos_registros(sheets, spreadsheet_id, df_novos, nome_aba):
 # LÓGICA INCREMENTAL
 # =====================================================
 
+def obter_sheet_id(sheets, spreadsheet_id, nome_aba):
+    """Retorna o sheetId numérico de uma aba pelo nome."""
+    info = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    for sheet in info["sheets"]:
+        if sheet["properties"]["title"] == nome_aba:
+            return int(sheet["properties"]["sheetId"])  # ✅ int() nativo
+    raise ValueError(f"❌ Aba '{nome_aba}' não encontrada!")
+
 def carregar_incremental(sheets, spreadsheet_id, df_novo, nome_aba, chave_pk):
     """
     Lógica incremental completa:
@@ -176,9 +184,46 @@ def carregar_incremental(sheets, spreadsheet_id, df_novo, nome_aba, chave_pk):
         # ⏭️ IGUAL — não faz nada
         pulados += 1
 
+    # --------------------------------------------------
+    # 🗑️ DELETADOS — existe no processed mas sumiu da fonte
+    # --------------------------------------------------
+    ids_novos      = set(df_novo[chave_pk].astype(str))
+    ids_existentes = set(df_existente[chave_pk].astype(str))
+    ids_deletados  = ids_existentes - ids_novos
+
+    deletados = 0
+    if ids_deletados:
+        df_existente_atual = ler_aba_processed(sheets, spreadsheet_id, nome_aba)
+        df_existente_atual[chave_pk] = df_existente_atual[chave_pk].astype(str)
+        sheet_id = obter_sheet_id(sheets, spreadsheet_id, nome_aba)
+
+        for id_deletado in ids_deletados:
+            linha_index  = df_existente_atual[df_existente_atual[chave_pk] == id_deletado].index[0]
+            linha_numero = int(linha_index) + 2  # ✅ int() nativo — resolve o int64!
+
+            sheets.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{
+                    "deleteDimension": {
+                        "range": {
+                            "sheetId"    : int(sheet_id),          # ✅ int() nativo
+                            "dimension"  : "ROWS",
+                            "startIndex" : int(linha_numero - 1),  # ✅ int() nativo
+                            "endIndex"   : int(linha_numero)       # ✅ int() nativo
+                        }
+                    }
+                }]}
+            ).execute()
+
+            df_existente_atual = df_existente_atual[
+                df_existente_atual[chave_pk] != id_deletado
+            ].reset_index(drop=True)
+            deletados += 1
+
     print(f"   ➕ Inseridos : {inseridos}")
     print(f"   ✏️  Atualizados: {atualizados}")
     print(f"   ⏭️  Pulados   : {pulados}")
+    print(f"   🗑️  Deletados  : {deletados}")
 
 # =====================================================
 # PIPELINE PRINCIPAL
