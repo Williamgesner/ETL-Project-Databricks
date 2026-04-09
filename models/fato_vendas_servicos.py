@@ -12,6 +12,7 @@ SCHEMA_FATO_CATAS_PAGAR = {
     "categoria_id"      : {"tipo": "ins64",     "nullable": False, "pk": False, "fk": None},
     "cliente_id"        : {"tipo": "ins64",     "nullable": False, "pk": False, "fk": None},
     "valor_total"       : {"tipo": "float",     "nullable": True, "pk": False, "fk": None},
+    "origem_entrada"    : {"tipo": "string",    "nullable": False, "pk": False, "fk": None},
     "data_servico"      : {"tipo": "datetime",  "nullable": True, "pk": False, "fk": None},
     "descricao"         : {"tipo": "string",    "nullable": True, "pk": False, "fk": None},
     "data_ingestao"     : {"tipo": "datetime",  "nullable": False, "pk": False, "fk": None},
@@ -33,12 +34,13 @@ def aplicar_schema_fato_vendas_servicos(df: pd.DataFrame) -> pd.DataFrame:
     # =====================================================
     # 1. GARANTIR TIPOS FINAIS
     # =====================================================
-    df["servico_id"]    = df["servico_id"].astype("int64")
-    df["categoria_id"]  = df["categoria_id"].astype("int64")
-    df["cliente_id"]    = df["cliente_id"].astype("int64")
-    df["valor_total"]   = df["valor_total"].astype("float")
-    df["data_servico"]  = pd.to_datetime(df["data_servico"])
-    df["descricao"]     = df["descricao"].astype("string")
+    df["servico_id"]     = df["servico_id"].astype("int64")
+    df["categoria_id"]   = df["categoria_id"].astype("int64")
+    df["cliente_id"]     = df["cliente_id"].astype("int64")
+    df["valor_total"]    = df["valor_total"].astype("float")
+    df["origem_entrada"] = df["origem_entrada"].astype("string")
+    df["data_servico"]   = pd.to_datetime(df["data_servico"])
+    df["descricao"]      = df["descricao"].astype("string")
 
     # =====================================================
     # 2. METADADOS
