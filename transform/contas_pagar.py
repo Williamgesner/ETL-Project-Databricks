@@ -68,7 +68,7 @@ def transformar_contas_pagar(df: pd.DataFrame) -> pd.DataFrame:
     df["categoria_id"]     = df["categoria_id"].astype("int64")
     df["valor"]            = df["valor"].astype("float")
     df["situacao"]         = df["situacao"].astype("string")
-    df["data_vencimento"]  = pd.to_datetime(df["data_vencimento"])
+    df["data_vencimento"]  = pd.to_datetime(df["data_vencimento"]).dt.date
     df["contato_id"]       = df["contato_id"].astype("int64")
     df["forma_pagamento"]  = df["forma_pagamento"].astype("string")
     df["origem_saida"]     = df["origem_saida"].astype("string")

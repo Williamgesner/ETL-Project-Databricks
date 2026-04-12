@@ -41,7 +41,7 @@ def transformar_caixa(df: pd.DataFrame) -> pd.DataFrame:
     # 5. GARANTIR TIPOS FINAIS
     # =====================================================
     df["origem"]        = df["origem"].astype("string")
-    df["data"]          = pd.to_datetime(df["data"])
+    df["data"]          = pd.to_datetime(df["data"]).dt.date
     df["saldo_inicial"] = df["saldo_inicial"].astype("float")
 
     print(f"   ✅ {len(df)} registros transformados")

@@ -66,7 +66,7 @@ def transformar_vendas_servicos(df: pd.DataFrame) -> pd.DataFrame:
     df["cliente_id"]       = df["cliente_id"].astype("int64")
     df["valor_total"]      = df["valor_total"].astype("float")
     df["origem_entrada"]   = df["origem_entrada"].astype("string")
-    df["data_servico"]     = pd.to_datetime(df["data_servico"])
+    df["data_servico"]     = pd.to_datetime(df["data_servico"]).dt.date
     df["descricao"]        = df["descricao"].astype("string")
 
     print(f"   ✅ {len(df)} registros transformados")
