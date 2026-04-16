@@ -1,5 +1,15 @@
 # 📊 ETL Pipeline — Databricks + Google Drive + Power BI
 
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?&logo=python&logoColor=white)](https://www.python.org/)
+[![Pandas](https://img.shields.io/badge/Pandas-150458?&logo=pandas&logoColor=white)](https://pandas.pydata.org/)
+[![Databricks](https://img.shields.io/badge/Databricks-FF3621?&logo=databricks&logoColor=white)](https://www.databricks.com/)
+[![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?&logo=googlesheets&logoColor=white)](https://www.google.com/sheets/about/)
+[![Google Drive](https://img.shields.io/badge/Google%20Drive-4285F4?&logo=googledrive&logoColor=white)](https://drive.google.com/)
+[![Google Cloud](https://img.shields.io/badge/Google%20Cloud-Service%20Account-4285F4?&logo=googlecloud&logoColor=white)](https://cloud.google.com/)
+[![Power BI](https://img.shields.io/badge/Power%20BI-F2C811?&logo=powerbi&logoColor=black)](https://powerbi.microsoft.com/)
+[![Power Automate](https://img.shields.io/badge/Power%20Automate-0066FF?&logo=powerautomate&logoColor=white)](https://powerautomate.microsoft.com/)
+[![Git](https://img.shields.io/badge/Git-F05032?&logo=git&logoColor=white)](https://git-scm.com/)
+
 Pipeline de dados desenvolvido inteiramente no **Databricks**, com carga incremental automática e dashboard atualizado em tempo real.
 
 ---
