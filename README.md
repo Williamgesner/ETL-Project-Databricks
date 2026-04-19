@@ -52,10 +52,12 @@ O cliente preenche manualmente uma planilha no Google Sheets (schema RAW). O pip
 │   ├── vendas_servicos.py
 │   ├── caixa.py
 │   └── tempo.py                 # Script standalone para popular dim_tempo
+│   └── metas.py
 ├── models/
 │   ├── dim_categorias.py
 │   ├── dim_contatos.py
 │   ├── dim_tempo.py
+│   ├── dim_metas.py
 │   ├── fato_contas_pagar.py
 │   ├── fato_vendas_servicos.py
 │   └── fato_caixa.py
@@ -131,6 +133,7 @@ Dashboard financeiro desenvolvido no Power BI com os seguintes painéis:
 - **Despesas por Categoria** — Onde o dinheiro saiu
 - **Saldo por Conta/Banco** — Visão consolidada por origem
 - **Formas de Pagamento** — Distribuição por tipo
+- **Metas** — Acompanhamento de metas da empresa
 - **Últimas Contas a Pagar** — Tabela com situação e vencimento
 
 ---
@@ -151,7 +154,7 @@ python transform/tempo.py
 
 ## 📸 Resultado
 
-![Dashboard Comercial 1](https://github.com/user-attachments/assets/0dfa41f0-1bc8-4bfb-b315-aff3360accd3)
+![Dashboard Comercial 1](https://github.com/user-attachments/assets/555b573a-6af5-4164-918c-a88551df3792)
 
 **Observações**
 - *⁠TODOS OS DADOS APRESENTADOS ACIMA SÃO FICTÍCIOS E AS IDENTIDADES DOS CLIENTES E DA EMPRESA FORAM PRESERVADAS*
