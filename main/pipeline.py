@@ -4,6 +4,7 @@ import subprocess
 # INSTALAÇÃO AUTOMÁTICA DE DEPENDÊNCIAS 
 # Isso garante que quando o job rodar automaticamente, as libs sempre estarão instaladas!
 # =========================================================================================
+
 subprocess.run([
     "pip", "install",
     "google-api-python-client",
@@ -16,6 +17,7 @@ sys.path.append("/Workspace/Users/william.gesner@outlook.com/ELT-Project-Databri
 
 import pandas as pd
 import io
+import time
 from datetime import datetime
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -42,7 +44,7 @@ from models.dim_metas             import aplicar_schema_dim_metas
 # =====================================================
 
 # ID da pasta processed no Google Drive que serão salvos os dados processados
-PROCESSED_FOLDER_ID = "1UL-geHSbquQpPT2PGWPjVHonoYQ9-5QE" 
+PROCESSED_FOLDER_ID = "1UL-geHSbquQpPT2PGWPjVHonoYQ9-5QE"
 
 # Chave primária de cada tabela
 PKS = {
@@ -53,6 +55,27 @@ PKS = {
     "fato_caixa"            : "origem",
     "dim_metas"             : "data_referencia"
 }
+
+# =====================================================
+# RETRY COM BACKOFF EXPONENCIAL
+# =====================================================
+
+def executar_com_retry(func, max_tentativas=5, espera_inicial=10):
+    """
+    Executa uma chamada à Sheets API com retry automático em caso de 429.
+    A espera dobra a cada tentativa: 10s → 20s → 40s → 80s → 160s
+    """
+    for tentativa in range(1, max_tentativas + 1):
+        try:
+            return func()
+        except HttpError as e:
+            if e.resp.status == 429:
+                espera = espera_inicial * (2 ** (tentativa - 1))
+                print(f"      ⚠️  Rate limit atingido. Aguardando {espera}s antes de tentar novamente... (tentativa {tentativa}/{max_tentativas})")
+                time.sleep(espera)
+            else:
+                raise  # outros erros sobem normalmente
+    raise RuntimeError("❌ Número máximo de tentativas atingido após rate limit.")
 
 # =====================================================
 # FUNÇÕES AUXILIARES — GOOGLE SHEETS
@@ -72,10 +95,12 @@ def get_sheets_service():
 def ler_aba_processed(sheets, spreadsheet_id, nome_aba):
     """Lê uma aba do processed e retorna como DataFrame. Retorna None se não existir."""
     try:
-        resultado = sheets.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=f"{nome_aba}!A1:ZZ"
-        ).execute()
+        resultado = executar_com_retry(lambda: 
+            sheets.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=f"{nome_aba}!A1:ZZ"
+            ).execute()
+        )
         valores = resultado.get("values", [])
         if len(valores) <= 1:
             return None
@@ -85,110 +110,110 @@ def ler_aba_processed(sheets, spreadsheet_id, nome_aba):
 
 def garantir_aba(sheets, spreadsheet_id, nome_aba):
     """Cria a aba se não existir."""
-    info = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    info = executar_com_retry(lambda:
+        sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    )
     abas = [s["properties"]["title"] for s in info["sheets"]]
     if nome_aba not in abas:
-        sheets.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"requests": [{"addSheet": {"properties": {"title": nome_aba}}}]}
-        ).execute()
+        executar_com_retry(lambda:
+            sheets.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{"addSheet": {"properties": {"title": nome_aba}}}]}
+            ).execute()
+        )
         print(f"   ✅ Aba '{nome_aba}' criada!")
-
-def salvar_novos_registros(sheets, spreadsheet_id, df_novos, nome_aba):
-    """Salva apenas os registros novos no final da aba."""
-    dados = df_novos.astype(str).values.tolist()
-    sheets.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=f"{nome_aba}!A1",
-        valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": dados}
-    ).execute()
-
-# =====================================================
-# LÓGICA INCREMENTAL
-# =====================================================
 
 def obter_sheet_id(sheets, spreadsheet_id, nome_aba):
     """Retorna o sheetId numérico de uma aba pelo nome."""
-    info = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    info = executar_com_retry(lambda:
+        sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    )
     for sheet in info["sheets"]:
         if sheet["properties"]["title"] == nome_aba:
-            return int(sheet["properties"]["sheetId"])  # ✅ int() nativo
+            return int(sheet["properties"]["sheetId"])  # ✅ int() nativo   
     raise ValueError(f"❌ Aba '{nome_aba}' não encontrada!")
+
+# =====================================================
+# LÓGICA INCREMENTAL — COM BATCH (LOTE)
+# =====================================================
 
 def carregar_incremental(sheets, spreadsheet_id, df_novo, nome_aba, chave_pk):
     """
-    Lógica incremental completa:
+    Lógica incremental com operações em BATCH (Lote) para evitar rate limit:
     ➕ Novos     → INSERT
     ✏️  Alterados → UPDATE (sobrescreve)
     ⏭️  Iguais    → SKIP
+    🗑️  Deletados → DELETE
     """
     print(f"\n   🔄 Verificando incremento — {nome_aba}...")
 
     garantir_aba(sheets, spreadsheet_id, nome_aba)
     df_existente = ler_aba_processed(sheets, spreadsheet_id, nome_aba)
+    colunas = df_novo.columns.tolist()
 
     # --------------------------------------------------
     # PRIMEIRA CARGA — aba vazia
     # --------------------------------------------------
     if df_existente is None or df_existente.empty:
         print(f"   ℹ️  Primeira carga! Salvando {len(df_novo)} registros...")
-        dados = [df_novo.columns.tolist()] + df_novo.astype(str).values.tolist()
-        sheets.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"{nome_aba}!A1",
-            valueInputOption="RAW",
-            body={"values": dados}
-        ).execute()
+        dados = [colunas] + df_novo.astype(str).values.tolist()
+        executar_com_retry(lambda:
+            sheets.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"{nome_aba}!A1",
+                valueInputOption="RAW",
+                body={"values": dados}
+            ).execute()
+        )
         print(f"   ✅ {len(df_novo)} registros salvos!")
         return
 
     # --------------------------------------------------
-    # CARGAS SEGUINTES — compara registro a registro
+    # CARGAS SEGUINTES — compara e acumula em listas
     # --------------------------------------------------
     df_existente[chave_pk] = df_existente[chave_pk].astype(str)
     df_novo[chave_pk]      = df_novo[chave_pk].astype(str)
 
-    inseridos  = 0
+    linhas_para_inserir  = []   # acumula linhas novas
+    ranges_para_atualizar = []  # acumula valueRanges para batchUpdate
+
+    inseridos   = 0
     atualizados = 0
-    pulados    = 0
-    colunas    = df_novo.columns.tolist()
+    pulados     = 0
+
+    colunas_comparacao = [c for c in colunas if c not in ["data_ingestao", "data_processamento"]]
 
     for _, linha_nova in df_novo.iterrows():
-        pk_valor   = str(linha_nova[chave_pk])
-        df_match   = df_existente[df_existente[chave_pk] == pk_valor]
+        pk_valor = str(linha_nova[chave_pk])
+        df_match = df_existente[df_existente[chave_pk] == pk_valor]
 
         # ➕ NOVO — ID não existe no processed
         if df_match.empty:
-            salvar_novos_registros(sheets, spreadsheet_id, linha_nova.to_frame().T, nome_aba)
+            linhas_para_inserir.append([str(v) for v in linha_nova[colunas].values])
             inseridos += 1
             continue
 
         # Compara os campos (ignora metadados de controle na comparação)
-        colunas_comparacao = [c for c in colunas if c not in ["data_ingestao", "data_processamento"]]
-        linha_existente    = df_match.iloc[0]
-
+        linha_existente = df_match.iloc[0]
         houve_alteracao = any(
             str(linha_nova[col]) != str(linha_existente.get(col, ""))
             for col in colunas_comparacao
             if col in linha_existente.index
         )
 
-        # ✏️ ALTERADO — sobrescreve o registro existente
+        # ✏️ ALTERADO — acumula para batch update e sobrescreve o registro existente
         if houve_alteracao:
-            linha_index  = df_existente[df_existente[chave_pk] == pk_valor].index[0]
+            linha_index  = df_match.index[0]
             linha_numero = linha_index + 2  # +1 cabeçalho, +1 base 1
 
-            linha_nova["data_processamento"] = datetime.now()  # atualiza timestamp
+            linha_nova = linha_nova.copy()
+            linha_nova["data_processamento"] = datetime.now() # atualiza timestamp
             valores = [[str(v) for v in linha_nova[colunas].values]]
 
-            sheets.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"{nome_aba}!A{linha_numero}",
-                valueInputOption="RAW",
-                body={"values": valores}
-            ).execute()
+            ranges_para_atualizar.append({
+                "range" : f"{nome_aba}!A{linha_numero}",
+                "values": valores
+            })
             atualizados += 1
             continue
 
@@ -196,44 +221,78 @@ def carregar_incremental(sheets, spreadsheet_id, df_novo, nome_aba, chave_pk):
         pulados += 1
 
     # --------------------------------------------------
-    # 🗑️ DELETADOS — existe no processed mas sumiu da fonte
+    # DISPARA INSERTS em uma única chamada
     # --------------------------------------------------
+    if linhas_para_inserir:
+        executar_com_retry(lambda:
+            sheets.spreadsheets().values().append(
+                spreadsheetId=spreadsheet_id,
+                range=f"{nome_aba}!A1",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": linhas_para_inserir}
+            ).execute()
+        )
+
+    # --------------------------------------------------
+    # DISPARA UPDATES em uma única chamada batchUpdate
+    # --------------------------------------------------
+    if ranges_para_atualizar:
+        executar_com_retry(lambda:
+            sheets.spreadsheets().values().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={
+                    "valueInputOption": "RAW",
+                    "data": ranges_para_atualizar
+                }
+            ).execute()
+        )
+
+    # -------------------------------------------------------------------------------------------------
+    # 🗑️ DELETADOS — acumula e dispara em uma única chamada - existe no processed mas sumiu da fonte
+    # -------------------------------------------------------------------------------------------------
     ids_novos      = set(df_novo[chave_pk].astype(str))
     ids_existentes = set(df_existente[chave_pk].astype(str))
     ids_deletados  = ids_existentes - ids_novos
 
     deletados = 0
     if ids_deletados:
-        df_existente_atual = ler_aba_processed(sheets, spreadsheet_id, nome_aba)
-        df_existente_atual[chave_pk] = df_existente_atual[chave_pk].astype(str)
+        df_atual = ler_aba_processed(sheets, spreadsheet_id, nome_aba)
+        df_atual[chave_pk] = df_atual[chave_pk].astype(str)
         sheet_id = obter_sheet_id(sheets, spreadsheet_id, nome_aba)
 
-        for id_deletado in ids_deletados:
-            linha_index  = df_existente_atual[df_existente_atual[chave_pk] == id_deletado].index[0]
-            linha_numero = int(linha_index) + 2  # ✅ int() nativo — resolve o int64!
+        # Ordena decrescente para deletar de baixo pra cima
+        # (evita que os índices se desloquem durante a deleção)
+        linhas_deletar = sorted([
+            int(df_atual[df_atual[chave_pk] == id_del].index[0]) + 1  # +1 pelo cabeçalho
+            for id_del in ids_deletados
+        ], reverse=True)
 
+        requests_delete = [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId"   : int(sheet_id),
+                        "dimension" : "ROWS",
+                        "startIndex": int(linha),
+                        "endIndex"  : int(linha) + 1
+                    }
+                }
+            }
+            for linha in linhas_deletar
+        ]
+
+        executar_com_retry(lambda:
             sheets.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id,
-                body={"requests": [{
-                    "deleteDimension": {
-                        "range": {
-                            "sheetId"    : int(sheet_id),          # ✅ int() nativo
-                            "dimension"  : "ROWS",
-                            "startIndex" : int(linha_numero - 1),  # ✅ int() nativo
-                            "endIndex"   : int(linha_numero)       # ✅ int() nativo
-                        }
-                    }
-                }]}
+                body={"requests": requests_delete}
             ).execute()
+        )
+        deletados = len(ids_deletados)
 
-            df_existente_atual = df_existente_atual[
-                df_existente_atual[chave_pk] != id_deletado
-            ].reset_index(drop=True)
-            deletados += 1
-
-    print(f"   ➕ Inseridos : {inseridos}")
+    print(f"   ➕ Inseridos  : {inseridos}")
     print(f"   ✏️  Atualizados: {atualizados}")
-    print(f"   ⏭️  Pulados   : {pulados}")
+    print(f"   ⏭️  Pulados    : {pulados}")
     print(f"   🗑️  Deletados  : {deletados}")
 
 # =====================================================
@@ -267,7 +326,7 @@ def rodar_pipeline():
     df_vendas_servicos = transformar_vendas_servicos(tabelas["registros__vendas_de_servicos"])
     df_caixa           = transformar_caixa(tabelas["registros__caixa"])
     df_metas           = transformar_metas(tabelas["registros__metas"])
-    
+
     df_categorias      = aplicar_schema_dim_categorias(df_categorias)
     df_contatos        = aplicar_schema_dim_contatos(df_contatos)
     df_contas_pagar    = aplicar_schema_fato_contas_pagar(df_contas_pagar)
@@ -280,18 +339,18 @@ def rodar_pipeline():
     # --------------------------------------------------
     print("\n💾 [3/3] LOAD INCREMENTAL")
 
-    carregar_incremental(sheets, spreadsheet_id, df_categorias,      "dim_categorias", PKS["dim_categorias"])
-    carregar_incremental(sheets, spreadsheet_id, df_contatos,        "dim_contatos", PKS["dim_contatos"])
-    carregar_incremental(sheets, spreadsheet_id, df_contas_pagar,    "fato_contas_pagar", PKS["fato_contas_pagar"])
+    carregar_incremental(sheets, spreadsheet_id, df_categorias,      "dim_categorias",       PKS["dim_categorias"])
+    carregar_incremental(sheets, spreadsheet_id, df_contatos,        "dim_contatos",         PKS["dim_contatos"])
+    carregar_incremental(sheets, spreadsheet_id, df_contas_pagar,    "fato_contas_pagar",    PKS["fato_contas_pagar"])
     carregar_incremental(sheets, spreadsheet_id, df_vendas_servicos, "fato_vendas_servicos", PKS["fato_vendas_servicos"])
-    carregar_incremental(sheets, spreadsheet_id, df_caixa,           "fato_caixa", PKS["fato_caixa"])
-    carregar_incremental(sheets, spreadsheet_id, df_metas,           "dim_metas", PKS["dim_metas"])
+    carregar_incremental(sheets, spreadsheet_id, df_caixa,           "fato_caixa",           PKS["fato_caixa"])
+    carregar_incremental(sheets, spreadsheet_id, df_metas,           "dim_metas",            PKS["dim_metas"])
 
     # --------------------------------------------------
     # RELATÓRIO FINAL
     # --------------------------------------------------
-    fim      = datetime.now()
-    duracao  = (fim - inicio).seconds
+    fim     = datetime.now()
+    duracao = (fim - inicio).seconds
 
     print("\n" + "="*60)
     print(f"✅ PIPELINE CONCLUÍDO em {duracao}s")
