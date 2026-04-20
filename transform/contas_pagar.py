@@ -14,6 +14,7 @@ def transformar_contas_pagar(df: pd.DataFrame) -> pd.DataFrame:
     - Converte tipos corretos
     - Padroniza strings (Primeira letra maiúscula)
     - Converte strings vazias para NaN
+    - Aplica regra de negócio para situação "Em aberto"
     """
 
     print("🔄 Transformando Contas a Pagar...")
@@ -73,6 +74,41 @@ def transformar_contas_pagar(df: pd.DataFrame) -> pd.DataFrame:
     df["forma_pagamento"]  = df["forma_pagamento"].astype("string")
     df["origem_saida"]     = df["origem_saida"].astype("string")
     df["descricao"]        = df["descricao"].astype("string")
+
+    # =====================================================
+    # 8. REGRA DE NEGÓCIO — SITUAÇÃO "EM ABERTO"
+    # =====================================================
+    print("   • Aplicando regra de negócio para contas 'Em aberto'...")
+    try:
+        hoje = pd.Timestamp.now().normalize().date()
+
+        mascara_em_aberto = df["situacao"].str.strip().str.lower() == "em aberto"
+        total_em_aberto   = mascara_em_aberto.sum()
+
+        if total_em_aberto > 0:
+            # Atrasada: vencimento < hoje
+            mascara_atrasada = mascara_em_aberto & (df["data_vencimento"] < hoje)
+            df.loc[mascara_atrasada, "situacao"] = "Atrasada"
+            qtd_atrasadas = mascara_atrasada.sum()
+
+            # Vence hoje: vencimento == hoje
+            mascara_vence_hoje = mascara_em_aberto & (df["data_vencimento"] == hoje)
+            df.loc[mascara_vence_hoje, "situacao"] = "Vence Hoje"
+            qtd_vence_hoje = mascara_vence_hoje.sum()
+
+            # Em aberto (futuro): vencimento > hoje — não faz nada
+            mascara_futuro = mascara_em_aberto & (df["data_vencimento"] > hoje)
+            qtd_futuro     = mascara_futuro.sum()
+
+            print(f"      ✅ Regra aplicada para {total_em_aberto} contas 'Em aberto':")
+            print(f"         • {qtd_atrasadas} → Atrasada")
+            print(f"         • {qtd_vence_hoje} → Vence Hoje")
+            print(f"         • {qtd_futuro} → Em aberto (sem alteração)")
+        else:
+            print("      ℹ️  Nenhuma conta com situação 'Em aberto' encontrada")
+
+    except Exception as e:
+        print(f"      ⚠️  Erro ao aplicar regra de negócio: {e}")
 
     print(f"   ✅ {len(df)} registros transformados")
     print(f"   ✅ Nulos em 'valor':           {df['valor'].isnull().sum()}")
